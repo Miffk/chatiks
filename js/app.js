@@ -136,10 +136,18 @@ function renderAIPanel() {
       const data = await askAI(pass.value.trim(), buildUserPrompt(a, ex));
       clearInterval(timer);
       store.set("chatiks-pass", pass.value.trim());
-      const ai = validate(data.result, a, ex);
+      state.raw = Object.assign({}, state.raw || {}, data.result); // при повторе не теряем уже пришедшую часть
+      const ai = validate(state.raw, a, ex);
       state.ai = ai; state.model = data.model;
       renderAI($("report"), a, ai, data.model);
-      panel.replaceChildren();
+      if (data.missing) {
+        // Одна из двух частей не пришла: оставляем кнопку, чтобы можно было попробовать ещё раз.
+        status.textContent = `Часть блоков не загрузилась: ${data.missing}`;
+        btn.disabled = false;
+        btn.textContent = "Попробовать ещё раз";
+      } else {
+        panel.replaceChildren();
+      }
     } catch (e) {
       clearInterval(timer);
       status.textContent = e.message;

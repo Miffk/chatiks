@@ -9,10 +9,11 @@
 //   API_URL          необязательно, по умолчанию https://openrouter.ai/api/v1/chat/completions
 
 const MAX_BODY = 400_000; // символов в запросе
-const ATTEMPTS = 2;       // сколько раз пробовать, если модель отказала или ответила не JSON
-const CALL_TIMEOUT = 100_000; // мс на одну попытку
+const ATTEMPTS = 3;            // сколько моделей пробовать за один запрос
+const CALL_TIMEOUT = 120_000;  // мс на одну модель
+const TOTAL_BUDGET = 170_000;  // мс на весь запрос: дольше пользователь ждать не станет
 // Бесплатные модели, которые хорошо пишут по-русски и умеют режим JSON.
-const DEFAULT_MODELS = "google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,inclusionai/ling-3.2-flash:free";
+const DEFAULT_MODELS = "nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,baidu/ernie-5.5-flash-preview:free,inclusionai/ling-3.2-flash:free";
 
 // Достаём JSON из ответа модели и чиним типичные поломки:
 // обёртку ```json, текст вокруг, запятые перед скобкой, оборванный конец.
@@ -99,68 +100,107 @@ export default {
     const models = (asked || env.MODEL || DEFAULT_MODELS).split(",").map(s => s.trim()).filter(Boolean);
     const where = request.cf ? ` [Cloudflare ${request.cf.colo || "?"}, ${request.cf.country || "?"}]` : "";
 
-    const call = async messages => {
-      const payload = { messages, temperature: 0.5, max_tokens: 8000, response_format: { type: "json_object" }, reasoning: { effort: "low" } };
-      if (models.length > 1) payload.models = models; else payload.model = models[0];
+    // Ждём промис не дольше ms; по истечении — ошибка с текстом msg.
+    const within = (promise, ms, msg) => new Promise((ok, fail) => {
+      const t = setTimeout(() => fail(Object.assign(new Error(msg), { status: 504, timeout: true })), Math.max(1, ms));
+      promise.then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); fail(e); });
+    });
+    const deadline = Date.now() + TOTAL_BUDGET;
+
+    // Один запрос к одной модели в потоковом режиме. Время ограничено целиком.
+    // Если время вышло, а модель не дописала, возвращаем то, что успело прийти: extractJson его починит.
+    const call = async (model, messages) => {
+      const left = deadline - Date.now();
+      if (left < 5000) throw Object.assign(new Error("Время на ответ вышло."), { status: 504, timeout: true });
+      const until = Date.now() + Math.min(CALL_TIMEOUT, left);
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), CALL_TIMEOUT);
+      const payload = { model, messages, stream: true, temperature: 0.5, max_tokens: 6000, response_format: { type: "json_object" }, reasoning: { effort: "low" } };
       let r;
       try {
-        r = await fetch(url, {
-        signal: ctl.signal,
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": allowed[0] || "https://github.com",
-          "X-Title": "chatiks",
-        },
-        body: JSON.stringify(payload),
-        });
+        r = await within(fetch(url, {
+          signal: ctl.signal,
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${env.API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": allowed[0] || "https://github.com",
+            "X-Title": "chatiks",
+          },
+          body: JSON.stringify(payload),
+        }), until - Date.now(), `${model} не начала отвечать вовремя`);
       } catch (e) {
-        clearTimeout(timer);
-        const err = new Error(`Нейронка не ответила за ${CALL_TIMEOUT / 1000} секунд.`);
-        err.status = 504; err.retry = true;
-        throw err;
+        ctl.abort();
+        throw Object.assign(new Error(e.timeout ? e.message : `${model}: сеть — ${e.message}`), { status: 504 });
       }
-      const data = await r.json().catch(() => ({}));
-      clearTimeout(timer);
-      if (!r.ok) {
-        const e = data.error || {};
+      const fail = (code, e) => {
+        e = e || {};
         const meta = e.metadata || {};
-        let msg = (typeof e === "string" ? e : e.message) || `ошибка ${r.status}`;
+        let msg = (typeof e === "string" ? e : e.message) || `ошибка ${code}`;
         if (meta.provider_name) msg += `; провайдер ${meta.provider_name}`;
-        if (meta.raw) msg += `; ${String(typeof meta.raw === "string" ? meta.raw : JSON.stringify(meta.raw)).slice(0, 200)}`;
-        const err = new Error(r.status === 429 ? "Лимит бесплатной нейронки на сегодня исчерпан или она перегружена. Попробуйте позже." : `Нейронка ответила (${r.status}): ${msg}`);
-        err.status = r.status === 429 ? 429 : 502;
-        err.retry = [403, 404, 408, 500, 502, 503].includes(r.status);
-        throw err;
+        if (meta.raw) msg += `; ${String(typeof meta.raw === "string" ? meta.raw : JSON.stringify(meta.raw)).slice(0, 160)}`;
+        return Object.assign(new Error(`${model} (${code}): ${msg}`), { status: code === 429 ? 429 : 502, code });
+      };
+      if (!r.ok) {
+        let data = {};
+        try { data = JSON.parse(await within(r.text(), 10000, "")); } catch (e) {}
+        ctl.abort();
+        throw fail(r.status, data.error);
       }
-      const ch = (data.choices && data.choices[0]) || {};
-      const m = ch.message || {};
-      const text = (typeof m.content === "string" && m.content.trim()) ? m.content : (typeof m.reasoning === "string" ? m.reasoning : "");
-      return { text, model: data.model || models[0], finish: ch.finish_reason || ch.native_finish_reason || "" };
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", content = "", reasoning = "", finish = "", got = model, partial = false;
+      outer: while (true) {
+        let chunk;
+        try {
+          chunk = await within(reader.read(), until - Date.now(), "timeout");
+        } catch (e) {
+          partial = true;
+          break;
+        }
+        if (chunk.done) break;
+        buf += dec.decode(chunk.value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line.startsWith("data:")) continue; // комментарии вида ": OPENROUTER PROCESSING"
+          const d = line.slice(5).trim();
+          if (d === "[DONE]") break outer;
+          let obj;
+          try { obj = JSON.parse(d); } catch (e) { continue; }
+          if (obj.error) { ctl.abort(); throw fail(obj.error.code || 502, obj.error); }
+          if (obj.model) got = obj.model;
+          const ch = (obj.choices && obj.choices[0]) || {};
+          const delta = ch.delta || {};
+          if (typeof delta.content === "string") content += delta.content;
+          if (typeof delta.reasoning === "string") reasoning += delta.reasoning;
+          if (ch.finish_reason) finish = ch.finish_reason;
+        }
+      }
+      ctl.abort();
+      return { text: content.trim() ? content : reasoning, model: got, finish: partial ? "время вышло" : finish, partial };
     };
 
     const messages = [{ role: "system", content: body.system }, { role: "user", content: body.user }];
-    // openrouter/free каждый раз выбирает случайную бесплатную модель:
-    // если одна отказала или ответила не JSON, следующая попытка обычно попадает на другую.
-    let lastErr = null, lastBad = null;
-    for (let i = 0; i < ATTEMPTS; i++) {
+    // Пробуем модели по очереди: если одна перегружена (429), отказала или ответила не JSON,
+    // сразу берём следующую. Список прокручиваем по кругу, пока не кончатся попытки или время.
+    const problems = [];
+    for (let i = 0; i < Math.max(ATTEMPTS, models.length) && Date.now() < deadline - 5000; i++) {
+      const model = models[i % models.length];
       try {
-        const out = await call(messages);
+        const out = await call(model, messages);
         const result = extractJson(out.text);
-        if (result) return reply({ result, model: out.model });
-        lastBad = out;
+        if (result && Object.keys(result).length) return reply({ result, model: out.model, partial: out.partial || undefined });
+        problems.push(`${out.model}: ответ не JSON${out.finish ? " (" + out.finish + ")" : ""}, начало «${out.text.replace(/\s+/g, " ").slice(0, 60)}»`);
       } catch (e) {
-        lastErr = e;
-        if (!e.retry) break;
+        problems.push(e.message);
+        if (e.code === 401 || e.code === 402) break; // ключ не работает или нет кредитов — дальше пробовать бессмысленно
       }
     }
-    if (lastErr && !lastBad) return reply({ error: (lastErr.message || "Ошибка нейронки.") + where }, lastErr.status || 502);
-    const why = lastBad
-      ? ` Последняя модель: ${lastBad.model}${lastBad.finish ? ", окончание: " + lastBad.finish : ""}, ответ начинался с «${lastBad.text.replace(/\s+/g, " ").slice(0, 80)}».`
-      : "";
-    return reply({ error: `Нейронка ${ATTEMPTS} раза ответила не по формату. Попробуйте ещё раз через минуту.${why}${where}` }, 502);
+    const all429 = problems.length && problems.every(p => /\(429\)/.test(p));
+    const head = all429
+      ? "Бесплатные нейронки сейчас перегружены или дневной лимит исчерпан. Попробуйте через несколько минут."
+      : "Не получилось получить ответ от нейронки. Попробуйте ещё раз через минуту.";
+    return reply({ error: `${head} Подробности: ${problems.join(" | ").slice(0, 700)}${where}` }, all429 ? 429 : 502);
   },
 };

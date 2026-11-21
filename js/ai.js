@@ -1,7 +1,7 @@
 // Запрос к нейронке через Cloudflare Worker и проверка ответа.
 import { CONFIG } from "../config.js";
 
-export const SYSTEM = `Ты пишешь игровой, но честный разбор переписки двух людей — для них самих. Тебе дают имена, посчитанные цифры и отрывки переписки.
+const RULES = `Ты пишешь игровой, но честный разбор переписки двух людей — для них самих. Тебе дают имена, посчитанные цифры и отрывки переписки.
 
 Правила:
 - Пиши по-русски, просто и тепло, короткими предложениями. Без психологических терминов и диагнозов.
@@ -10,7 +10,11 @@ export const SYSTEM = `Ты пишешь игровой, но честный р�
 - Имена пиши ровно так, как они даны. Род каждого определяй по тому, как человек пишет о себе («я пришла» / «я пришёл»).
 - Никаких процентов совместимости и «вероятностей влюбиться».
 - Не пересказывай адреса, телефоны, интимные подробности и чужие секреты.
-- Ответь ТОЛЬКО одним JSON-объектом по схеме ниже. Без пояснений, без markdown.
+- Не рассуждай вслух. Сразу ответь ТОЛЬКО одним JSON-объектом по схеме ниже, без пояснений и без markdown.`;
+
+// Запрос делится на две части, которые идут параллельно: каждый ответ короче, и ждать вдвое меньше.
+export const SYSTEMS = [
+  RULES + `
 
 Схема:
 {
@@ -26,7 +30,13 @@ export const SYSTEM = `Ты пишешь игровой, но честный р�
     {"q": "Кто переходит на личности", "answer": "", "text": "", "quotes": []},
     {"q": "Кто обесценивает", "answer": "", "text": "", "quotes": []}
   ],
-  "main_question": {"title": "главный невысказанный или открытый вопрос этой пары, до 70 символов", "text": "2–3 предложения", "quote": {"who": "", "text": "", "date": ""}},
+  "main_question": {"title": "главный невысказанный или открытый вопрос этой пары, до 70 символов", "text": "2–3 предложения", "quote": {"who": "", "text": "", "date": ""}}
+}
+conflict_steps — ровно 3 шага. Если ссор в отрывках почти нет, так и напиши в шагах. main_question может быть null, если такого вопроса нет.`,
+  RULES + `
+
+Схема:
+{
   "flags": {"green": ["4 пункта"], "red": ["4 пункта, бережно"]},
   "tarot": [
     {"pos": "Прошлое", "card": "название карты таро", "text": "2 предложения по мотивам переписки"},
@@ -36,7 +46,8 @@ export const SYSTEM = `Ты пишешь игровой, но честный р�
   "gossip": ["4 смешные, но правдивые «сплетни» по переписке, каждая начинается со слова «Говорят,»"],
   "date": {"where": "", "before": "", "after": "", "finale": "", "dress": ""}
 }
-conflict_steps — ровно 3 шага. Если ссор в отрывках почти нет, так и напиши в шагах. main_question может быть null, если такого вопроса нет. date — идеальное свидание, собранное из того, что эти двое обсуждали, хотели или любят.`;
+date — идеальное свидание, собранное из того, что эти двое обсуждали, хотели или любят.`,
+];
 
 export function buildUserPrompt(a, ex) {
   const [A, Bn] = a.names;
@@ -92,14 +103,13 @@ export function validate(res, a, ex) {
   return out;
 }
 
-export async function askAI(password, user) {
-  if (!CONFIG.workerUrl) throw new Error("Сервер для нейронки ещё не подключён: в config.js не указан адрес Worker.");
+async function askOne(password, system, user) {
   let r;
   try {
     r = await fetch(CONFIG.workerUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password, system: SYSTEM, user }),
+      body: JSON.stringify({ password, system, user }),
     });
   } catch (e) {
     throw new Error("Не получилось достучаться до сервера. Проверьте интернет и попробуйте ещё раз.");
@@ -110,4 +120,15 @@ export async function askAI(password, user) {
   if (!r.ok) throw new Error(data.error || `Сервер ответил ошибкой ${r.status}.`);
   if (!data.result) throw new Error("Нейронка вернула пустой ответ. Попробуйте ещё раз.");
   return data;
+}
+
+// Обе части параллельно. Если одна не удалась, показываем то, что пришло.
+export async function askAI(password, user) {
+  if (!CONFIG.workerUrl) throw new Error("Сервер для нейронки ещё не подключён: в config.js не указан адрес Worker.");
+  const parts = await Promise.allSettled(SYSTEMS.map(sys => askOne(password, sys, user)));
+  const ok = parts.filter(p => p.status === "fulfilled").map(p => p.value);
+  const errs = parts.filter(p => p.status === "rejected").map(p => p.reason.message);
+  if (!ok.length) throw new Error(errs[0] === errs[1] || errs.length < 2 ? errs[0] : errs.join(" · "));
+  const models = [...new Set(ok.map(d => d.model).filter(Boolean))].join(", ");
+  return { result: Object.assign({}, ...ok.map(d => d.result)), model: models, missing: errs.length ? errs[0] : null };
 }
