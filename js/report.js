@@ -46,8 +46,40 @@ export function makeCtx(a) {
   return { N, v, who };
 }
 
+// Иллюстрации к разделам лежат в img/. Если картинки нет, она просто не показывается.
+function art(name) {
+  const img = h("img", { class: "sec-art", src: `img/${name}.webp`, alt: "", loading: "lazy" });
+  img.addEventListener("error", () => img.remove());
+  return img;
+}
 function section(title, lead, ...kids) {
-  return h("section", null, h("h2", null, title), lead ? h("p", { class: "lead" }, lead) : null, ...kids);
+  let name = null;
+  if (typeof title === "object") { name = title.art; title = title.t; }
+  const head = h("div", null, h("h2", null, title), lead ? h("p", { class: "lead" }, lead) : null);
+  return h("section", null, name ? h("div", { class: "sec-head" }, head, art(name)) : head, ...kids);
+}
+function gameSection(tag, title, lead, name, ...kids) {
+  const head = h("div", null, h("span", { class: "game-tag" }, tag), h("h2", null, title), h("p", { class: "lead" }, lead));
+  return h("section", null, h("div", { class: "sec-head" }, head, art(name)), ...kids);
+}
+
+// Простые значки вместо эмодзи.
+const ICONS = {
+  sun: "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1",
+  moon: "M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z",
+  heart: "M12 20s-7-4.4-9-9a4.8 4.8 0 0 1 9-3 4.8 4.8 0 0 1 9 3c-2 4.6-9 9-9 9z",
+  mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3",
+  wave: "M4 15c0-6 3-10 8-10s8 4 8 10M8 15a4 4 0 0 0 8 0M12 19v2",
+  eye: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+};
+function icon(name) {
+  const s = document.createElementNS(NS, "svg");
+  s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("width", "22"); s.setAttribute("height", "22"); s.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", ICONS[name] || ICONS.eye);
+  p.setAttribute("fill", "none"); p.setAttribute("stroke", "currentColor"); p.setAttribute("stroke-width", "2"); p.setAttribute("stroke-linecap", "round"); p.setAttribute("stroke-linejoin", "round");
+  s.append(p);
+  return s;
 }
 function legend(N, kind = "line") {
   return h("div", { class: "legend" }, N.map((n, i) => h("span", null, h("i", { class: kind === "line" ? "key-line" : "key-rect", style: `background:var(--series-${i + 1})` }), n)));
@@ -212,8 +244,8 @@ export function renderReport(root, a, hasAI, onRename) {
   const first = new Date(a.firstT).toISOString().slice(0, 7), last = new Date(a.lastT).toISOString().slice(0, 7);
   const redraw = [];
 
-  root.append(h("header", null,
-    h("h1", null, `${N[0]} и ${N[1]}`),
+  root.append(h("header", { class: "rep-head" },
+    h("h1", null, h("span", { class: "nm s1" }, N[0]), h("span", { class: "amp" }, "и"), h("span", { class: "nm s2" }, N[1])),
     h("p", null, `Разбор переписки в Telegram · ${monthYear(first)} — ${monthYear(last)} · `, renameUI(a, onRename)),
     a.others > a.total * 0.01 ? h("p", { class: "note" }, `В чате есть и другие участники. В разборе только двое самых активных, сообщений остальных: ${fmt(a.others)}.`) : null));
 
@@ -241,30 +273,30 @@ export function renderReport(root, a, hasAI, onRename) {
   if (fm[0] + fm[1] >= 5) {
     const w = fm[0] >= fm[1] ? 0 : 1;
     signs.push(close(fm[0], fm[1])
-      ? ["☀️", "Утро начинаете по очереди", `«Доброе утро» первым пишет то один, то другой: ${N[0]} — ${dd(fm[0])}, ${N[1]} — ${dd(fm[1])}.`]
-      : ["☀️", `Утро чаще начинает ${N[w]}`, `«Доброе утро» ${v(w, "первым", "первой", "первым")} пишет ${N[w]} в ${fmt(fm[w])} ${pl(fm[w], "дне", "днях", "днях")}, ${N[1 - w]} в ${fmt(fm[1 - w])}. Это ${pct(fm[w], fm[1 - w])}% утр.`]);
+      ? ["sun", "Утро начинаете по очереди", `«Доброе утро» первым пишет то один, то другой: ${N[0]} — ${dd(fm[0])}, ${N[1]} — ${dd(fm[1])}.`]
+      : ["sun", `Утро чаще начинает ${N[w]}`, `«Доброе утро» ${v(w, "первым", "первой", "первым")} пишет ${N[w]} в ${fmt(fm[w])} ${pl(fm[w], "дне", "днях", "днях")}, ${N[1 - w]} в ${fmt(fm[1 - w])}. Это ${pct(fm[w], fm[1 - w])}% утр.`]);
   }
   if (fn[0] + fn[1] >= 5) {
     const w = fn[0] >= fn[1] ? 0 : 1;
     signs.push(close(fn[0], fn[1])
-      ? ["🌙", "Спокойной ночи желаете поровну", `${N[0]} — ${dd(fn[0])}, ${N[1]} — ${dd(fn[1])}.`]
-      : ["🌙", `Спокойной ночи чаще желает ${N[w]}`, `${N[w]} ${v(w, "первым", "первой", "первым")} в ${fmt(fn[w])} ${pl(fn[w], "дне", "днях", "днях")}, ${N[1 - w]} в ${fmt(fn[1 - w])}.`]);
+      ? ["moon", "Спокойной ночи желаете поровну", `${N[0]} — ${dd(fn[0])}, ${N[1]} — ${dd(fn[1])}.`]
+      : ["moon", `Спокойной ночи чаще желает ${N[w]}`, `${N[w]} ${v(w, "первым", "первой", "первым")} в ${fmt(fn[w])} ${pl(fn[w], "дне", "днях", "днях")}, ${N[1 - w]} в ${fmt(fn[1 - w])}.`]);
   }
   if (p[0].love + p[1].love >= 5) {
     const w = p[0].love >= p[1].love ? 0 : 1;
     signs.push(close(p[0].love, p[1].love)
-      ? ["💬", "Нежности поровну", `«Люблю», «скучаю», «зай» и сердечки: ${N[0]} — ${fmt(p[0].love)}, ${N[1]} — ${fmt(p[1].love)}.`]
-      : ["💬", `Нежные слова: ${fmt(p[w].love)} против ${fmt(p[1 - w].love)}`, `«Люблю», «скучаю», «зай» и сердечки чаще пишет ${N[w]}.`]);
+      ? ["heart", "Нежности поровну", `«Люблю», «скучаю», «зай» и сердечки: ${N[0]} — ${fmt(p[0].love)}, ${N[1]} — ${fmt(p[1].love)}.`]
+      : ["heart", `Нежные слова: ${fmt(p[w].love)} против ${fmt(p[1 - w].love)}`, `«Люблю», «скучаю», «зай» и сердечки чаще пишет ${N[w]}.`]);
   }
   const vm = [Math.round(p[0].voiceSec / 60), Math.round(p[1].voiceSec / 60)];
-  if (vm[0] + vm[1] >= 10 && !close(vm[0], vm[1])) { const w = vm[0] >= vm[1] ? 0 : 1; signs.push(["🎙️", `Голосом больше говорит ${N[w]}`, `${N[w]}: ${fmt(vm[w])} мин голосовых и кружочков, ${N[1 - w]}: ${fmt(vm[1 - w])} мин.`]); }
-  signs.push(["🙋", `Разговор начинает ${N[lead]}`, `После паузы больше шести часов ${N[lead]} ${v(lead, "писал первым", "писала первой", "начинал(а)")} ${fmt(a.init[lead])} раз, ${N[1 - lead]} — ${fmt(a.init[1 - lead])}.`]);
-  const signBox = h("div", { class: "grid2", id: "signs" }, signs.slice(0, 4).map(([ico, t, s]) => h("div", { class: "sign" }, h("div", { class: "ico" }, ico), h("h3", null, t), h("p", null, s))));
+  if (vm[0] + vm[1] >= 10 && !close(vm[0], vm[1])) { const w = vm[0] >= vm[1] ? 0 : 1; signs.push(["mic", `Голосом больше говорит ${N[w]}`, `${N[w]}: ${fmt(vm[w])} мин голосовых и кружочков, ${N[1 - w]}: ${fmt(vm[1 - w])} мин.`]); }
+  signs.push(["wave", `Разговор начинает ${N[lead]}`, `После паузы больше шести часов ${N[lead]} ${v(lead, "писал первым", "писала первой", "начинал(а)")} ${fmt(a.init[lead])} раз, ${N[1 - lead]} — ${fmt(a.init[1 - lead])}.`]);
+  const signBox = h("div", { class: "grid2", id: "signs" }, signs.slice(0, 4).map(([ico, t, s]) => h("div", { class: "sign" }, h("div", { class: "ico" }, icon(ico)), h("h3", null, t), h("p", null, s))));
   let score = [0, 0];
   [fm, fn, [p[0].love, p[1].love], a.init].forEach(([x, y]) => { if (x + y) score[x >= y ? 0 : 1]++; });
   const w = score[0] >= score[1] ? 0 : 1;
   const verdictText = score[0] === score[1] ? "По цифрам внимание у вас распределено примерно поровну." : `По цифрам внимания больше проявляет ${N[w]}: в ${Math.max(...score)} признаках из 4.`;
-  root.append(section("Кто привязался сильнее", hasAI ? "Признаки по цифрам. Самый интересный признак ищет нейронка." : "Признаки по цифрам переписки.", signBox,
+  root.append(section({ t: "Кто привязался сильнее", art: "attach" }, hasAI ? "Признаки по цифрам. Самый интересный признак ищет нейронка." : "Признаки по цифрам переписки.", signBox,
     h("div", { class: "verdict", id: "attVerdict" }, h("div", { class: "tag" }, "Вывод"), h("p", null, verdictText))));
 
   // Месяцы
@@ -287,7 +319,7 @@ export function renderReport(root, a, hasAI, onRename) {
   // Календарь
   const cal = calendarItems(a, N, v).slice(0, 9);
   if (cal.length >= 3) {
-    root.append(section("Календарь вашей истории", "Первые слова, рекорды и важные дни. Нажмите на окошко, чтобы открыть его.",
+    root.append(section({ t: "Календарь вашей истории", art: "calendar" }, "Первые слова, рекорды и важные дни. Нажмите на окошко, чтобы открыть его.",
       h("div", { class: "advent" }, cal.map(([d, t, s], i) => flipCard("win", String(i + 1), "открыть", [h("div", { class: "d" }, d), h("div", { class: "h" }, t), h("p", null, s)], i === 0)))));
   }
 
@@ -315,7 +347,7 @@ export function renderReport(root, a, hasAI, onRename) {
     const byText = t.by[0] + t.by[1] ? ` Из них ${N[0]}: ${t.by[0]}, ${N[1]}: ${t.by[1]}.` : "";
     const partText = ["утром", "днём", "вечером", "ночью"][flat[2]];
     const [box, ramp] = heatmap(a.heat);
-    root.append(section(`Самый нежный час: ${WEEK[t.weekday]}, ${hourRu(t.hour)}`,
+    root.append(section({ art: "tender", t: `Самый нежный час: ${WEEK[t.weekday]}, ${hourRu(t.hour)}` },
       `В это время нежных слов и сердечек больше всего: ${String(t.per1000).replace(".", ",")} на тысячу сообщений.${byText} По частям суток нежнее всего ${partText}, ${["в понедельник", "во вторник", "в среду", "в четверг", "в пятницу", "в субботу", "в воскресенье"][flat[1]]}.`,
       h("div", { class: "card" }, box, ramp)));
   }
@@ -341,7 +373,7 @@ export function renderReport(root, a, hasAI, onRename) {
     const lt = a.laughTotal;
     const lw = lt[0] >= lt[1] ? 0 : 1;
     const ratio = lt[1 - lw] ? (lt[lw] / lt[1 - lw]).toFixed(1).replace(".", ",") : null;
-    root.append(section(`Самое длинное «АХАХАХ»: ${L0.len} ${pl(L0.len, "буква", "буквы", "букв")}`,
+    root.append(section({ art: "laugh", t: `Самое длинное «АХАХАХ»: ${L0.len} ${pl(L0.len, "буква", "буквы", "букв")}` },
       `Моменты, когда вы смеялись громче всего. Громкость — это длина смеха в буквах. Вообще ${N[lw]} смеётся ${ratio && lt[lw] > lt[1 - lw] * 1.2 ? `в ${ratio} раза чаще` : "примерно так же часто"}: ${fmt(lt[lw])} раз против ${fmt(lt[1 - lw])}.`,
       h("div", { class: "laughs" }, a.laughs.map((l, i) => h("div", { class: "laugh" },
         h("div", { class: "laugh-head" }, h("b", null, `${i + 1} место · ${l.len} ${pl(l.len, "буква", "буквы", "букв")}`), h("span", null, dateRu(l.date))),
@@ -355,7 +387,7 @@ export function renderReport(root, a, hasAI, onRename) {
       h("div", { class: "words" }, a.uniq[i].slice(0, 8).map(([w, c]) => h("span", null, w, h("small", null, fmt(c))))));
     const kids = [h("div", { class: "grid2" }, col(0), col(1))];
     if (a.refrain) kids.push(h("div", { class: "verdict" }, h("div", { class: "tag" }, "Общее любимое слово"), h("p", null, `«${a.refrain.w}» любите вы оба: ${N[0]} — ${fmt(a.refrain.a)} раз, ${N[1]} — ${fmt(a.refrain.b)}.`)));
-    root.append(section("Слова только для двоих", "Слова, которые пишет почти только один из вас. Число — сколько раз.", ...kids));
+    root.append(section({ t: "Слова только для двоих", art: "words" }, "Слова, которые пишет почти только один из вас. Число — сколько раз.", ...kids));
   }
 
   // Годы
@@ -422,7 +454,7 @@ export function renderAI(root, a, ai, model) {
   const at = ai.attachment;
   if (at && at.surprise && at.surprise.title) {
     const signs = root.querySelector("#signs");
-    const card = h("div", { class: "sign surprise" }, h("div", { class: "ico" }, "👀"), h("h3", null, at.surprise.title),
+    const card = h("div", { class: "sign surprise" }, h("div", { class: "ico" }, icon("eye")), h("h3", null, at.surprise.title),
       h("p", null, at.surprise.text, at.surprise.quote ? " " : "", quoteLine(at.surprise.quote, N)));
     if (signs.children.length >= 4) signs.lastElementChild.replaceWith(card); else signs.append(card);
   }
@@ -432,7 +464,7 @@ export function renderAI(root, a, ai, model) {
   const cbox = root.querySelector("#aiConflicts");
   cbox.replaceChildren();
   if (ai.conflict_steps.length) {
-    cbox.append(section("Как устроены ссоры", "Типичная схема конфликта по прочитанным отрывкам.",
+    cbox.append(section({ t: "Как устроены ссоры", art: "fights" }, "Типичная схема конфликта по прочитанным отрывкам.",
       h("div", { class: "card" }, h("ol", { class: "steps" }, ai.conflict_steps.map(s => h("li", null, h("div", null, h("h3", null, s.title), h("p", null, s.text))))))));
   }
   if (ai.fight_roles.length) {
@@ -458,13 +490,11 @@ export function renderAI(root, a, ai, model) {
       h("div", { class: "flag-col bad" }, h("h3", null, h("i", { class: "dot" }), "Red flags"), h("ul", null, ai.flags.red.map(x => h("li", null, x)))))));
   }
   if (ai.tarot.length) {
-    gbox.append(h("section", null, h("span", { class: "game-tag" }, "Игра, а не анализ"), h("h2", null, "Три карты таро"),
-      h("p", { class: "lead" }, "Карты подобраны по мотивам переписки, но это развлечение. Нажмите на карту, чтобы перевернуть её."),
+    gbox.append(gameSection("Игра, а не анализ", "Три карты таро", "Карты подобраны по мотивам переписки, но это развлечение. Нажмите на карту, чтобы перевернуть её.", "tarot",
       h("div", { class: "tarot" }, ai.tarot.map(t => flipCard("tcard", "✦", t.pos || "Карта", [h("div", { class: "d" }, t.pos), h("div", { class: "h" }, t.card), h("p", null, t.text)], false)))));
   }
   if (ai.gossip.length) {
-    gbox.append(h("section", null, h("span", { class: "game-tag" }, "Игра по мотивам чата"), h("h2", null, "Про вас ходят сплетни"),
-      h("p", { class: "lead" }, "Сплетни сочинила нейронка по вашей переписке. Нажмите на полоску, чтобы сорвать её."),
+    gbox.append(gameSection("Игра по мотивам чата", "Про вас ходят сплетни", "Сплетни сочинила нейронка по вашей переписке. Нажмите на полоску, чтобы сорвать её.", "gossip",
       h("div", { class: "gossip" }, ai.gossip.map((g, i) => {
         const el = h("div", { class: "gs" }, h("span", { class: "n" }, i + 1), h("p", null, g));
         el.append(h("button", { type: "button", onclick: () => el.classList.add("torn") }, "Сорви, чтобы узнать"));
@@ -474,8 +504,7 @@ export function renderAI(root, a, ai, model) {
   if (ai.date) {
     const d = ai.date;
     const rows = [["Где", d.where], ["До", d.before], ["После", d.after], ["Финал", d.finale], ["Дресс-код", d.dress]].filter(r => r[1]);
-    gbox.append(h("section", null, h("span", { class: "game-tag" }, "Игра по мотивам чата"), h("h2", null, "Идеальное свидание"),
-      h("p", { class: "lead" }, "Свидание, собранное из ваших же сообщений."),
+    gbox.append(gameSection("Игра по мотивам чата", "Идеальное свидание", "Свидание, собранное из ваших же сообщений.", "date",
       h("div", { class: "ticket" }, h("div", { class: "ticket-top" }, h("div", { class: "k" }, "Билет на свидание"), h("div", { class: "t" }, "Один вечер на двоих")),
         rows.map(([k, val]) => h("div", { class: "ticket-row" }, h("div", { class: "k" }, k), h("div", null, val))))));
   }

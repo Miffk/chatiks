@@ -2,57 +2,122 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Чатики</title>
-<meta name="description" content="Бесплатный разбор переписки в Telegram: кто пишет первым, самый нежный час, ссоры, флаги и таро.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+<meta name="description" content="Бесплатный разбор переписки в Telegram: кто пишет первым, самый нежный час, рекорды, ссоры, флаги и таро.">
+<meta property="og:title" content="Чатики — разбор переписки в Telegram">
+<meta property="og:description" content="Загрузите экспорт чата и узнайте, кто пишет первым, когда вы нежнее всего и кто громче смеётся.">
+<meta property="og:image" content="https://miffk.github.io/chatiks/img/hero.webp">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><path d='M8 14a10 10 0 0 1 10-10h20a10 10 0 0 1 10 10v12a10 10 0 0 1-10 10H22l-10 8v-9a10 10 0 0 1-4-7z' fill='%232a78d6'/><path d='M26 30a8 8 0 0 1 8-8h14a8 8 0 0 1 8 8v10a8 8 0 0 1-4 7v8l-8-7H34a8 8 0 0 1-8-8z' fill='%23eb6834'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<button class="theme-btn" id="themeBtn" type="button">Тема</button>
-<div class="wrap">
-  <div id="start">
-    <div class="hero">
-      <h1>Чатики</h1>
-      <p>Загрузите экспорт переписки из Telegram и получите разбор: кто пишет первым, самый нежный час, рекорды, самый громкий смех, ссоры, флаги и таро.</p>
-      <p>Это бесплатно и без регистрации.</p>
-    </div>
+<button class="theme-btn" id="themeBtn" type="button" aria-label="Переключить тему">
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="currentColor"/></svg>
+</button>
 
-    <div class="drop" id="drop">
-      <p class="big">Перетащите сюда папку экспорта</p>
-      <p class="small">или файлы messages.html / result.json из неё</p>
-      <div class="btns">
-        <button class="btn primary" type="button" id="pickDir">Выбрать папку</button>
-        <button class="btn" type="button" id="pickFiles">Выбрать файлы</button>
+<div id="start">
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-text">
+        <div class="wordmark"><span class="wm-bubble">чатики</span></div>
+        <h1>Что на самом деле происходит в вашей переписке</h1>
+        <p class="hero-sub">Загрузите экспорт чата из Telegram и узнайте, кто пишет первым, когда вы нежнее всего, кто громче смеётся и как вы ссоритесь. Бесплатно и без регистрации.</p>
+        <div class="hero-cta">
+          <a class="btn primary" href="#upload">Разобрать свой чат</a>
+          <span class="hero-note">Переписка не покидает ваш браузер</span>
+        </div>
       </div>
-      <input type="file" id="dirInput" webkitdirectory multiple hidden>
-      <input type="file" id="fileInput" multiple accept=".html,.json,text/html,application/json" hidden>
-      <div class="progress" id="progress"><div id="progressText">Читаю переписку…</div><div class="bar"><i id="progressBar"></i></div></div>
-      <div class="err" id="err" role="alert"></div>
+      <div class="hero-art">
+        <img class="art" src="img/hero.webp" alt="" width="1024" height="1024" onerror="this.remove()">
+        <div class="demo-chat" aria-hidden="true">
+          <div class="b them" style="--d:0">кто из нас первый пишет «доброе утро»?</div>
+          <div class="b me" style="--d:1">ну конечно я 🙄</div>
+          <div class="b them" style="--d:2">давай проверим</div>
+          <div class="b card" style="--d:3">
+            <span class="card-k">Утро начинает Лёва</span>
+            <span class="card-v">91%</span>
+            <span class="card-bar"><i style="width:91%"></i></span>
+          </div>
+        </div>
+      </div>
     </div>
+  </header>
 
-    <div class="privacy"><span>🔒</span><span>Переписка разбирается прямо в вашем браузере и никуда не загружается. Только если вы сами включите блоки с оценками ИИ, небольшая часть сообщений уйдёт нейронке, и сайт заранее покажет, сколько и куда.</span></div>
+  <main class="wrap">
+    <section class="upload" id="upload">
+      <div class="drop" id="drop">
+        <div class="drop-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21.4 11.1 12.2 20.3a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <p class="big">Перетащите сюда папку экспорта</p>
+        <p class="small">или файлы <code>messages.html</code> / <code>result.json</code> из неё</p>
+        <div class="btns">
+          <button class="btn primary" type="button" id="pickDir">Выбрать папку</button>
+          <button class="btn" type="button" id="pickFiles">Выбрать файлы</button>
+        </div>
+        <input type="file" id="dirInput" webkitdirectory multiple hidden>
+        <input type="file" id="fileInput" multiple accept=".html,.json,text/html,application/json" hidden>
+        <div class="progress" id="progress"><div id="progressText">Читаю переписку…</div><div class="bar"><i id="progressBar"></i></div></div>
+        <div class="err" id="err" role="alert"></div>
+      </div>
+      <p class="privacy-line">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        Цифры и графики считаются прямо в браузере. Переписка никуда не загружается.
+      </p>
+    </section>
 
-    <div class="howto card">
+    <section class="features">
+      <h2>Что будет в отчёте</h2>
+      <div class="feat-grid">
+        <article class="feat"><img src="img/calendar.webp" alt="" loading="lazy" onerror="this.remove()"><div class="feat-body"><h3>Календарь первых раз</h3><p>Первое сообщение, первое «люблю», рекордный день и самая длинная серия без молчания.</p></div></article>
+        <article class="feat"><img src="img/tender.webp" alt="" loading="lazy" onerror="this.remove()"><div class="feat-body"><h3>Самый нежный час</h3><p>День недели и время, когда в чате больше всего сердечек и тёплых слов.</p></div></article>
+        <article class="feat"><img src="img/laugh.webp" alt="" loading="lazy" onerror="this.remove()"><div class="feat-body"><h3>Самое длинное «АХАХАХ»</h3><p>Топ моментов, когда вы смеялись громче всего, вместе с перепиской вокруг.</p></div></article>
+        <article class="feat"><img src="img/fights.webp" alt="" loading="lazy" onerror="this.remove()"><div class="feat-body"><h3>Как устроены ссоры <span class="chip-ai">ИИ</span></h3><p>Кто первым мирится, кто вспоминает прошлое. Каждый вывод подтверждён цитатой.</p></div></article>
+        <article class="feat"><img src="img/tarot.webp" alt="" loading="lazy" onerror="this.remove()"><div class="feat-body"><h3>Таро и сплетни <span class="chip-ai">ИИ</span></h3><p>Три карты по мотивам переписки и правдивые сплетни, которые надо сорвать.</p></div></article>
+        <article class="feat"><img src="img/date.webp" alt="" loading="lazy" onerror="this.remove()"><div class="feat-body"><h3>Идеальное свидание <span class="chip-ai">ИИ</span></h3><p>Билет на вечер, собранный из того, о чём вы мечтали в чате.</p></div></article>
+      </div>
+    </section>
+
+    <section class="privacy">
+      <img class="privacy-art" src="img/privacy.webp" alt="" loading="lazy" onerror="this.remove()">
+      <div>
+        <h2>Ваша переписка остаётся у вас</h2>
+        <ul class="ticks">
+          <li><b>Без загрузки.</b> Файлы читает ваш браузер. На сервер они не отправляются.</li>
+          <li><b>ИИ только по кнопке.</b> Если включите блоки с оценками ИИ, около тысячи сообщений уйдут нейронке. Сайт заранее покажет, сколько и куда.</li>
+          <li><b>Ничего не хранится.</b> Закроете вкладку, и отчёт исчезнет.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="howto">
       <h2>Как сделать экспорт</h2>
-      <ol>
-        <li>Откройте <b>Telegram Desktop</b> на компьютере (в телефоне экспорта нет).</li>
-        <li>Зайдите в чат → <b>⋮</b> в правом верхнем углу → <b>Экспорт истории чата</b>.</li>
-        <li>Снимите галочки с фото, видео и файлов — так будет быстрее. Формат: <b>HTML</b> или <b>JSON</b>.</li>
-        <li>Нажмите «Экспортировать», а потом выберите здесь получившуюся папку.</li>
+      <ol class="how-steps">
+        <li><b>Откройте Telegram Desktop</b><span>В приложении на телефоне экспорта нет.</span></li>
+        <li><b>Чат → ⋮ → Экспорт истории</b><span>Меню в правом верхнем углу открытого чата.</span></li>
+        <li><b>Снимите галочки с медиа</b><span>Фото и видео не нужны. Формат HTML или JSON.</span></li>
+        <li><b>Выберите папку здесь</b><span>Ту, что Telegram сохранил в «Загрузки».</span></li>
       </ol>
-    </div>
-  </div>
+    </section>
+  </main>
+</div>
 
-  <div id="report" hidden></div>
-
-  <div class="toolbar" id="toolbar" hidden>
+<main class="wrap" id="reportWrap" hidden>
+  <div id="report"></div>
+  <div class="toolbar" id="toolbar">
     <button class="btn" type="button" id="printBtn">Сохранить в PDF</button>
     <button class="btn" type="button" id="againBtn">Разобрать другой чат</button>
   </div>
+</main>
 
-  <footer class="site">Чатики — открытый код на <a href="https://github.com/Miffk/chatiks">GitHub</a>.</footer>
-</div>
+<footer class="site wrap">
+  <span class="wm-bubble small">чатики</span>
+  <span>Открытый код на <a href="https://github.com/Miffk/chatiks">GitHub</a></span>
+</footer>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

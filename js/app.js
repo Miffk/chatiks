@@ -83,8 +83,7 @@ export async function handleFiles(files) {
     const root = $("report");
     drawAll = renderReport(root, a, hasAI, rename);
     $("start").hidden = true;
-    root.hidden = false;
-    $("toolbar").hidden = false;
+    $("reportWrap").hidden = false;
     document.title = `${a.names[0]} и ${a.names[1]} · Чатики`;
     if (hasAI) renderAIPanel();
     window.scrollTo(0, 0);
