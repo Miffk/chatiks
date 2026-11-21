@@ -1,0 +1,7 @@
+# Экспорты чатов и любые личные данные никогда не коммитим
+*.html.bak
+ChatExport*/
+result.json
+messages*.html
+_test*/
+.DS_Store

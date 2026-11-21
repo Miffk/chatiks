@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Чатики</title>
+<meta name="description" content="Бесплатный разбор переписки в Telegram: кто пишет первым, самый нежный час, ссоры, флаги и таро.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<button class="theme-btn" id="themeBtn" type="button">Тема</button>
+<div class="wrap">
+  <div id="start">
+    <div class="hero">
+      <h1>Чатики</h1>
+      <p>Загрузите экспорт переписки из Telegram и получите разбор: кто пишет первым, самый нежный час, рекорды, самый громкий смех, ссоры, флаги и таро.</p>
+      <p>Это бесплатно и без регистрации.</p>
+    </div>
+
+    <div class="drop" id="drop">
+      <p class="big">Перетащите сюда папку экспорта</p>
+      <p class="small">или файлы messages.html / result.json из неё</p>
+      <div class="btns">
+        <button class="btn primary" type="button" id="pickDir">Выбрать папку</button>
+        <button class="btn" type="button" id="pickFiles">Выбрать файлы</button>
+      </div>
+      <input type="file" id="dirInput" webkitdirectory multiple hidden>
+      <input type="file" id="fileInput" multiple accept=".html,.json,text/html,application/json" hidden>
+      <div class="progress" id="progress"><div id="progressText">Читаю переписку…</div><div class="bar"><i id="progressBar"></i></div></div>
+      <div class="err" id="err" role="alert"></div>
+    </div>
+
+    <div class="privacy"><span>🔒</span><span>Переписка разбирается прямо в вашем браузере и никуда не загружается. Только если вы сами включите блоки с оценками ИИ, небольшая часть сообщений уйдёт нейронке, и сайт заранее покажет, сколько и куда.</span></div>
+
+    <div class="howto card">
+      <h2>Как сделать экспорт</h2>
+      <ol>
+        <li>Откройте <b>Telegram Desktop</b> на компьютере (в телефоне экспорта нет).</li>
+        <li>Зайдите в чат → <b>⋮</b> в правом верхнем углу → <b>Экспорт истории чата</b>.</li>
+        <li>Снимите галочки с фото, видео и файлов — так будет быстрее. Формат: <b>HTML</b> или <b>JSON</b>.</li>
+        <li>Нажмите «Экспортировать», а потом выберите здесь получившуюся папку.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div id="report" hidden></div>
+
+  <div class="toolbar" id="toolbar" hidden>
+    <button class="btn" type="button" id="printBtn">Сохранить в PDF</button>
+    <button class="btn" type="button" id="againBtn">Разобрать другой чат</button>
+  </div>
+
+  <footer class="site">Чатики — открытый код на <a href="https://github.com/Miffk/chatiks">GitHub</a>.</footer>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
