@@ -4,12 +4,15 @@
 //   API_KEY          секрет: ключ OpenRouter (или другого OpenAI-совместимого сервиса)
 //   ACCESS_PASSWORD  секрет: пароль, который вы дадите друзьям
 //   ALLOWED_ORIGIN   адрес сайта, например https://miffk.github.io (можно несколько через запятую)
-//   MODEL            необязательно, по умолчанию openrouter/free.
-//                    Можно несколько через запятую: OpenRouter попробует их по очереди.
+//   MODEL            необязательно. Одна или несколько моделей через запятую:
+//                    OpenRouter пробует их по очереди. По умолчанию — DEFAULT_MODELS ниже.
 //   API_URL          необязательно, по умолчанию https://openrouter.ai/api/v1/chat/completions
 
 const MAX_BODY = 400_000; // символов в запросе
-const ATTEMPTS = 3;       // сколько раз пробовать, если модель отказала или ответила не JSON
+const ATTEMPTS = 2;       // сколько раз пробовать, если модель отказала или ответила не JSON
+const CALL_TIMEOUT = 100_000; // мс на одну попытку
+// Бесплатные модели, которые хорошо пишут по-русски и умеют режим JSON.
+const DEFAULT_MODELS = "google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,inclusionai/ling-3.2-flash:free";
 
 // Достаём JSON из ответа модели и чиним типичные поломки:
 // обёртку ```json, текст вокруг, запятые перед скобкой, оборванный конец.
@@ -91,13 +94,20 @@ export default {
     if (typeof body.system !== "string" || typeof body.user !== "string") return reply({ error: "В запросе нет текста." }, 400);
 
     const url = env.API_URL || "https://openrouter.ai/api/v1/chat/completions";
-    const models = (env.MODEL || "openrouter/free").split(",").map(s => s.trim()).filter(Boolean);
+    // Сайт может попросить конкретную модель, но только бесплатную.
+    const asked = typeof body.model === "string" && /^[\w.\/-]+:free$|^openrouter\/free$/.test(body.model) ? body.model : null;
+    const models = (asked || env.MODEL || DEFAULT_MODELS).split(",").map(s => s.trim()).filter(Boolean);
     const where = request.cf ? ` [Cloudflare ${request.cf.colo || "?"}, ${request.cf.country || "?"}]` : "";
 
     const call = async messages => {
-      const payload = { messages, temperature: 0.5, max_tokens: 12000, response_format: { type: "json_object" } };
+      const payload = { messages, temperature: 0.5, max_tokens: 8000, response_format: { type: "json_object" }, reasoning: { effort: "low" } };
       if (models.length > 1) payload.models = models; else payload.model = models[0];
-      const r = await fetch(url, {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), CALL_TIMEOUT);
+      let r;
+      try {
+        r = await fetch(url, {
+        signal: ctl.signal,
         method: "POST",
         headers: {
           "Authorization": `Bearer ${env.API_KEY}`,
@@ -106,8 +116,15 @@ export default {
           "X-Title": "chatiks",
         },
         body: JSON.stringify(payload),
-      });
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        const err = new Error(`Нейронка не ответила за ${CALL_TIMEOUT / 1000} секунд.`);
+        err.status = 504; err.retry = true;
+        throw err;
+      }
       const data = await r.json().catch(() => ({}));
+      clearTimeout(timer);
       if (!r.ok) {
         const e = data.error || {};
         const meta = e.metadata || {};

@@ -126,15 +126,22 @@ function renderAIPanel() {
     status));
   const run = async () => {
     btn.disabled = true;
-    status.replaceChildren(h("span", { class: "spin" }), "Нейронка читает отрывки. Обычно это занимает до минуты…");
+    const t0 = Date.now();
+    const label = document.createTextNode("");
+    const tick = () => { label.textContent = `Нейронка читает отрывки… ${Math.round((Date.now() - t0) / 1000)} с. Обычно это занимает одну-две минуты.`; };
+    tick();
+    const timer = setInterval(tick, 1000);
+    status.replaceChildren(h("span", { class: "spin" }), label);
     try {
       const data = await askAI(pass.value.trim(), buildUserPrompt(a, ex));
+      clearInterval(timer);
       store.set("chatiks-pass", pass.value.trim());
       const ai = validate(data.result, a, ex);
       state.ai = ai; state.model = data.model;
       renderAI($("report"), a, ai, data.model);
       panel.replaceChildren();
     } catch (e) {
+      clearInterval(timer);
       status.textContent = e.message;
       btn.disabled = false;
     }
