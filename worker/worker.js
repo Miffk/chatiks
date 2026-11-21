@@ -4,17 +4,65 @@
 //   API_KEY          секрет: ключ OpenRouter (или другого OpenAI-совместимого сервиса)
 //   ACCESS_PASSWORD  секрет: пароль, который вы дадите друзьям
 //   ALLOWED_ORIGIN   адрес сайта, например https://miffk.github.io (можно несколько через запятую)
-//   MODEL            необязательно, по умолчанию openrouter/free
+//   MODEL            необязательно, по умолчанию openrouter/free.
+//                    Можно несколько через запятую: OpenRouter попробует их по очереди.
 //   API_URL          необязательно, по умолчанию https://openrouter.ai/api/v1/chat/completions
 
 const MAX_BODY = 400_000; // символов в запросе
+const ATTEMPTS = 3;       // сколько раз пробовать, если модель отказала или ответила не JSON
 
-function extractJson(s) {
+// Достаём JSON из ответа модели и чиним типичные поломки:
+// обёртку ```json, текст вокруг, запятые перед скобкой, оборванный конец.
+export function extractJson(s) {
   if (!s) return null;
-  s = s.replace(/<think>[\s\S]*?<\/think>/g, "");
-  const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a < 0 || b <= a) return null;
-  try { return JSON.parse(s.slice(a, b + 1)); } catch (e) { return null; }
+  s = s.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/```(?:json)?/gi, "");
+  const a = s.indexOf("{");
+  if (a < 0) return null;
+  const b = s.lastIndexOf("}");
+  const tries = [];
+  if (b > a) tries.push(s.slice(a, b + 1));
+  tries.push(closeJson(s.slice(a)));
+  for (const t of tries) {
+    for (const fix of [x => x, x => x.replace(/,\s*([}\]])/g, "$1")]) {
+      try {
+        const v = JSON.parse(fix(t));
+        if (v && typeof v === "object") return v;
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+// Закрывает оборванный JSON: отрезает недописанный хвост и добавляет нужные скобки.
+export function closeJson(t) {
+  const stack = [];
+  let inStr = false, esc = false, lastSafe = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') { inStr = false; lastSafe = i + 1; }
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") { stack.pop(); lastSafe = i + 1; if (!stack.length) return t.slice(0, i + 1); }
+    else if (c === ",") lastSafe = i;
+  }
+  // Обрываем на последнем целом значении и закрываем открытые скобки.
+  let head = t.slice(0, lastSafe).replace(/[,:]\s*$/, "").replace(/,\s*"[^"]*"\s*$/, "").replace(/\{\s*"[^"]*"\s*$/, "{");
+  const st = [];
+  inStr = false; esc = false;
+  for (const c of head) {
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === "{" || c === "[") st.push(c);
+    else if (c === "}" || c === "]") st.pop();
+  }
+  if (inStr) head += '"';
+  while (st.length) head += st.pop() === "{" ? "}" : "]";
+  return head;
 }
 
 export default {
@@ -43,8 +91,12 @@ export default {
     if (typeof body.system !== "string" || typeof body.user !== "string") return reply({ error: "В запросе нет текста." }, 400);
 
     const url = env.API_URL || "https://openrouter.ai/api/v1/chat/completions";
-    const model = env.MODEL || "openrouter/free";
+    const models = (env.MODEL || "openrouter/free").split(",").map(s => s.trim()).filter(Boolean);
+    const where = request.cf ? ` [Cloudflare ${request.cf.colo || "?"}, ${request.cf.country || "?"}]` : "";
+
     const call = async messages => {
+      const payload = { messages, temperature: 0.5, max_tokens: 12000, response_format: { type: "json_object" } };
+      if (models.length > 1) payload.models = models; else payload.model = models[0];
       const r = await fetch(url, {
         method: "POST",
         headers: {
@@ -53,7 +105,7 @@ export default {
           "HTTP-Referer": allowed[0] || "https://github.com",
           "X-Title": "chatiks",
         },
-        body: JSON.stringify({ model, messages, temperature: 0.6, max_tokens: 6000 }),
+        body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -67,33 +119,31 @@ export default {
         err.retry = [403, 404, 408, 500, 502, 503].includes(r.status);
         throw err;
       }
-      const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-      return { text: typeof text === "string" ? text : "", model: data.model || model };
+      const ch = (data.choices && data.choices[0]) || {};
+      const m = ch.message || {};
+      const text = (typeof m.content === "string" && m.content.trim()) ? m.content : (typeof m.reasoning === "string" ? m.reasoning : "");
+      return { text, model: data.model || models[0], finish: ch.finish_reason || ch.native_finish_reason || "" };
     };
 
     const messages = [{ role: "system", content: body.system }, { role: "user", content: body.user }];
-    const where = request.cf ? ` [Cloudflare ${request.cf.colo || "?"}, ${request.cf.country || "?"}]` : "";
     // openrouter/free каждый раз выбирает случайную бесплатную модель:
-    // если одна отказала, следующая попытка обычно попадает на другую.
-    const callRetry = async msgs => {
-      let last;
-      for (let i = 0; i < 3; i++) {
-        try { return await call(msgs); } catch (e) { last = e; if (!e.retry) break; }
+    // если одна отказала или ответила не JSON, следующая попытка обычно попадает на другую.
+    let lastErr = null, lastBad = null;
+    for (let i = 0; i < ATTEMPTS; i++) {
+      try {
+        const out = await call(messages);
+        const result = extractJson(out.text);
+        if (result) return reply({ result, model: out.model });
+        lastBad = out;
+      } catch (e) {
+        lastErr = e;
+        if (!e.retry) break;
       }
-      throw last;
-    };
-    try {
-      let out = await callRetry(messages);
-      let result = extractJson(out.text);
-      if (!result) {
-        // Одна повторная попытка, если модель ответила не JSON.
-        out = await callRetry([...messages, { role: "assistant", content: out.text.slice(0, 4000) }, { role: "user", content: "Ответ должен быть одним JSON-объектом по схеме, без текста вокруг. Пришли только JSON." }]);
-        result = extractJson(out.text);
-      }
-      if (!result) return reply({ error: "Нейронка ответила не по формату. Попробуйте ещё раз." }, 502);
-      return reply({ result, model: out.model });
-    } catch (e) {
-      return reply({ error: (e.message || "Ошибка нейронки.") + where }, e.status || 502);
     }
+    if (lastErr && !lastBad) return reply({ error: (lastErr.message || "Ошибка нейронки.") + where }, lastErr.status || 502);
+    const why = lastBad
+      ? ` Последняя модель: ${lastBad.model}${lastBad.finish ? ", окончание: " + lastBad.finish : ""}, ответ начинался с «${lastBad.text.replace(/\s+/g, " ").slice(0, 80)}».`
+      : "";
+    return reply({ error: `Нейронка ${ATTEMPTS} раза ответила не по формату. Попробуйте ещё раз через минуту.${why}${where}` }, 502);
   },
 };
