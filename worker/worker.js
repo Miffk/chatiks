@@ -57,9 +57,14 @@ export default {
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const msg = (data.error && (data.error.message || data.error)) || `ошибка ${r.status}`;
-        const err = new Error(r.status === 429 ? "Лимит бесплатной нейронки на сегодня исчерпан или она перегружена. Попробуйте позже." : `Нейронка ответила: ${msg}`);
+        const e = data.error || {};
+        const meta = e.metadata || {};
+        let msg = (typeof e === "string" ? e : e.message) || `ошибка ${r.status}`;
+        if (meta.provider_name) msg += `; провайдер ${meta.provider_name}`;
+        if (meta.raw) msg += `; ${String(typeof meta.raw === "string" ? meta.raw : JSON.stringify(meta.raw)).slice(0, 200)}`;
+        const err = new Error(r.status === 429 ? "Лимит бесплатной нейронки на сегодня исчерпан или она перегружена. Попробуйте позже." : `Нейронка ответила (${r.status}): ${msg}`);
         err.status = r.status === 429 ? 429 : 502;
+        err.retry = [403, 404, 408, 500, 502, 503].includes(r.status);
         throw err;
       }
       const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -67,18 +72,28 @@ export default {
     };
 
     const messages = [{ role: "system", content: body.system }, { role: "user", content: body.user }];
+    const where = request.cf ? ` [Cloudflare ${request.cf.colo || "?"}, ${request.cf.country || "?"}]` : "";
+    // openrouter/free каждый раз выбирает случайную бесплатную модель:
+    // если одна отказала, следующая попытка обычно попадает на другую.
+    const callRetry = async msgs => {
+      let last;
+      for (let i = 0; i < 3; i++) {
+        try { return await call(msgs); } catch (e) { last = e; if (!e.retry) break; }
+      }
+      throw last;
+    };
     try {
-      let out = await call(messages);
+      let out = await callRetry(messages);
       let result = extractJson(out.text);
       if (!result) {
         // Одна повторная попытка, если модель ответила не JSON.
-        out = await call([...messages, { role: "assistant", content: out.text.slice(0, 4000) }, { role: "user", content: "Ответ должен быть одним JSON-объектом по схеме, без текста вокруг. Пришли только JSON." }]);
+        out = await callRetry([...messages, { role: "assistant", content: out.text.slice(0, 4000) }, { role: "user", content: "Ответ должен быть одним JSON-объектом по схеме, без текста вокруг. Пришли только JSON." }]);
         result = extractJson(out.text);
       }
       if (!result) return reply({ error: "Нейронка ответила не по формату. Попробуйте ещё раз." }, 502);
       return reply({ result, model: out.model });
     } catch (e) {
-      return reply({ error: e.message || "Ошибка нейронки." }, e.status || 502);
+      return reply({ error: (e.message || "Ошибка нейронки.") + where }, e.status || 502);
     }
   },
 };
